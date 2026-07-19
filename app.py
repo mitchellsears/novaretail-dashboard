@@ -21,6 +21,33 @@ st.set_page_config(
 
 DATA_PATH = "NR_dataset_cleaned.csv"
 
+# Fixed color coding so segment meaning is consistent across every chart in the
+# app (Decline always red, Promising always green, etc.) instead of Plotly's
+# default palette assigning colors arbitrarily based on sort order.
+SEGMENT_COLORS = {
+    "Promising": "#2CA02C",   # green
+    "Growth": "#1F77B4",      # blue
+    "Stable": "#B8960C",      # amber/gold
+    "Decline": "#D62728",     # red
+    "Unknown": "#7F7F7F",     # gray
+}
+
+# Below this many rows, a chart is flagged as low-sample so viewers don't
+# over-read noisy patterns from a handful of transactions.
+LOW_SAMPLE_THRESHOLD = 5
+
+
+def sample_note(n_rows: int, n_customers: int | None = None) -> str:
+    """Build a small caption noting how many rows/customers feed a chart, with
+    an explicit low-sample warning when the slice is thin."""
+    parts = [f"n = {n_rows} transaction{'s' if n_rows != 1 else ''}"]
+    if n_customers is not None:
+        parts.append(f"{n_customers} customer{'s' if n_customers != 1 else ''}")
+    note = " \u00b7 ".join(parts)
+    if n_rows < LOW_SAMPLE_THRESHOLD:
+        note += " \u2014 \u26a0\ufe0f small sample, interpret with caution"
+    return note
+
 
 # ---------------------------------------------------------------------------
 # Data loading (cached, with error handling so a missing/broken file fails
@@ -199,7 +226,8 @@ with tab_overview:
             .reset_index()
         )
         fig_trend = px.line(
-            trend, x="TransactionDate", y="PurchaseAmount", color="label", markers=True
+            trend, x="TransactionDate", y="PurchaseAmount", color="label", markers=True,
+            color_discrete_map=SEGMENT_COLORS,
         )
         fig_trend.update_layout(
             xaxis_title="Week", yaxis_title="Revenue ($)", legend_title="Segment"
@@ -210,6 +238,7 @@ with tab_overview:
             "lines signal emerging opportunity; a falling Decline line is not "
             "necessarily good news \u2014 it may mean those customers are lapsing entirely."
         )
+        st.caption(sample_note(len(filtered), filtered["CustomerID"].nunique()))
 
     with row2_right:
         st.subheader("Customers by segment")
@@ -219,6 +248,7 @@ with tab_overview:
         seg_counts.columns = ["label", "count"]
         fig_seg = px.bar(
             seg_counts.sort_values("count"), x="count", y="label", orientation="h", color="label",
+            color_discrete_map=SEGMENT_COLORS,
         )
         fig_seg.update_layout(showlegend=False, xaxis_title="Customers", yaxis_title="")
         st.plotly_chart(fig_seg, use_container_width=True)
@@ -227,6 +257,7 @@ with tab_overview:
             "A shrinking Promising/Growth base relative to Stable/Decline is an early "
             "warning sign for future revenue."
         )
+        st.caption(sample_note(len(filtered), active_customers))
 
     row3_left, row3_right = st.columns(2)
 
@@ -249,6 +280,7 @@ with tab_overview:
             "Compares Online vs. Physical Store revenue by region \u2014 useful for "
             "deciding where to invest in e-commerce vs. in-store experience."
         )
+        st.caption(sample_note(len(filtered)))
 
     with row3_right:
         st.subheader("Revenue by product category")
@@ -266,6 +298,7 @@ with tab_overview:
             "where the existing customer base already spends the most, and where "
             "marketing or inventory investment may pay off fastest."
         )
+        st.caption(sample_note(len(filtered)))
 
 # ---------------------------------------------------------------------------
 # TAB 2: Insight narrative -- dynamically recomputed from the CURRENT filter
@@ -273,6 +306,11 @@ with tab_overview:
 # from whatever slice of data the user is looking at, not hard-coded text.
 # ---------------------------------------------------------------------------
 with tab_insights:
+    st.caption(
+        f"Insights below are computed from the current filter: {sample_note(len(filtered), active_customers)}. "
+        "With a 100-transaction sample overall, narrow filter combinations can drop to just a "
+        "handful of rows \u2014 treat highly-filtered insights as directional, not conclusive."
+    )
     st.subheader("Growth opportunity")
     cat_rev = filtered.groupby("ProductCategory")["PurchaseAmount"].sum().sort_values(ascending=False)
     if len(cat_rev) > 0:
